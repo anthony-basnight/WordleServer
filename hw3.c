@@ -8,6 +8,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <string.h>
+
 
 
 
@@ -39,20 +41,29 @@ int wordle_server(int argc, char** argv)
     char* path = *(argv + 3); /* name of the dictionary file */
     int num_words = atoi(*(argv + 4)); /* number of words in the input file */
 
-    char** dictionary = calloc(num_words, sizeof(6)); /* allocate the dictionary to hold num_words amount of 5 letter words */
-    char* buffer = calloc(6, 1);
+    char** dictionary = calloc(num_words, sizeof(8)); /* allocate the dictionary to hold num_words amount of 5 letter words */
+    for (int i = 0; i < num_words; i++) {
+        *(dictionary + i) = malloc(6);
+    }
+    char* buffer = calloc(7, 1);
     int fd = open(path, O_RDONLY);
-    for(int i = 0; i < num_words; i++){
-        int rc = read(fd, buffer, 5);
-        if(rc != 5){
+    if(fd == -1){
             fprintf(stderr, "vibe check failed\n");
             return 69;
         }
+    for(int i = 0; i < num_words; i++){
+        int rc = read(fd, buffer, 6);
+        if(rc != 6){
+            fprintf(stderr, "vibe check failed\n");
+            return 69;
+        }
+        *(buffer + rc - 1) = '\0';
         strcpy(*(dictionary+i), buffer);
+        
     }
     free(buffer);
     for(int i = 0; i < num_words; i++){
-        fprintf("%s\n", buffer + i);
+        printf("%s\n", *(dictionary + i));
     }
 
     
