@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <string.h>
+#include <pthread.h>
 
 #define MAXBUFFER 16
 
@@ -20,16 +21,25 @@ extern char ** words;
 struct arguments {
     struct sockaddr_in client;
     int sd;
+    int seed;
 };
 
 void* wordle(void* arg) {
     /* this function is called by each thread and contains the logic to the wordle game */
     int n;
+    struct sockaddr_in remote_client = ((struct arguments *)arg)->client;
+    char* buffer = calloc(9, 1);
+    int sd = ((struct arguments *)arg)->sd;
+    int seed = ((struct arguments *)arg)->seed;
+    free(arg);
+    
+    char* hidden_word = calloc(6, sizeof(char));
+    srand(seed);
+    int rand_index = rand() % (sizeof(words) / 8);
+    strcpy(hidden_word, *(words + rand_index));
+    printf("hidden word: %s\n", hidden_word);
     do {
-        char* buffer = calloc(MAXBUFFER + 1, 1);
-        struct sockaddr_in remote_client = ((struct arguments *)arg)->client;
-        int sd = ((struct arguments *)arg)->sd;
-        free(arg);
+
         printf( "CHILD: Blocked on recv()\n" );  /* or we can use read() */
         n = recv( sd, buffer, MAXBUFFER, 0 );
 
@@ -43,13 +53,33 @@ void* wordle(void* arg) {
             printf( "CHILD: Rcvd message (%d bytes) from %s: \"%s\"\n", n, inet_ntoa( (struct in_addr)remote_client.sin_addr ), buffer );
 
             printf( "CHILD: Sending acknowledgement to client\n" );
-            n = send( sd, "ACK\n", 4, 0 );   /* or we can use write() */
+
+            char* guess = calloc(6, sizeof(char));
+            strncpy(guess, buffer + 3, 5);
+            int found = 0;
+            /* check if valid word was given and create the correct buffer to send back */
+            for ( char ** ptr = words ; *ptr ; ptr++ ){
+                if(strcmp(guess, *ptr) == 0){
+                    found = 1;
+                }
+            }
+            if (found) {
+                /* valid guess*/
+
+            } else{
+                /* invalid guess*/
+
+            }
+
+
+            n = send( sd, buffer, 9, 0 );   /* or we can use write() */
             if ( n == -1 ) { perror( "send() failed" ); return EXIT_FAILURE; }
         }
-    }
-    while ( n > 0 );
+    } while ( n > 0 );
 
     printf( "CHILD: All done\n" );
+
+    close(sd);
     return EXIT_SUCCESS;
 
 }
@@ -67,9 +97,10 @@ int wordle_server(int argc, char** argv) {
     char* path = *(argv + 3); /* name of the dictionary file */
     int num_words = atoi(*(argv + 4)); /* number of words in the input file */
 
-    char** dictionary = calloc(num_words + 1, sizeof(8)); /* allocate the dictionary to hold num_words amount of 5 letter words */
+    free(words);
+    words = calloc(num_words + 1, 8); /* allocate the dictionary to hold num_words amount of 5 letter words */
     for (int i = 0; i < num_words; i++) {
-        *(dictionary + i) = malloc(6);
+        *(words + i) = malloc(6);
     }
     
     char* buffer = calloc(7, 1);
@@ -79,21 +110,21 @@ int wordle_server(int argc, char** argv) {
         return 69;
     }
     
-    for(int i = 0; i < num_words; i++){
+    for(int i = 0; i < num_words; i++) {
         int rc = read(fd, buffer, 6);
         if(rc != 6){
             fprintf(stderr, "vibe check failed\n");
             return 69;
         }
         *(buffer + rc - 1) = '\0';
-        strcpy(*(dictionary+i), buffer);   
+        strcpy(*(words + i), buffer);
     }
 
     free(buffer);
-    for(int i = 0; i < num_words; i++){
-        printf("%s\n", *(dictionary + i));
+    for(int i = 0; i < num_words; i++) {
+        printf("%s\n", *(words + i));
     }
-    *(dictionary + num_words) = NULL;
+    *(words + num_words) = NULL;
     
     /* Create the listener socket as TCP socket (SOCK_STREAM) */
     int listener = socket( AF_INET, SOCK_STREAM, 0 );
@@ -126,9 +157,6 @@ int wordle_server(int argc, char** argv) {
     printf( "SERVER: TCP listener socket (fd %d) bound to port %d\n", listener, port );
 
     /* ========================= network setup code above ==================== */
-
-    int* siddies = calloc(1, sizeof(int));
-    int sd_count = 0;
     while ( 1 ) {
         struct sockaddr_in remote_client;
         int addrlen = sizeof( remote_client );
@@ -136,10 +164,6 @@ int wordle_server(int argc, char** argv) {
         printf( "SERVER: Blocked on accept()\n" );
         int newsd = accept( listener, (struct sockaddr *)&remote_client, (socklen_t *)&addrlen );
         if ( newsd == -1 ) { perror( "accept() failed" ); continue; }
-        
-        sd_count++;
-        siddies = realloc(sd_count, sizeof(int));
-        *(siddies + sd_count - 1) = newsd;
 
         printf( "SERVER: Accepted new client connection on newsd %d\n", newsd );
 
@@ -154,6 +178,7 @@ int wordle_server(int argc, char** argv) {
         struct arguments * args = malloc(sizeof(remote_client) + 4);
         args->client = remote_client;
         args->sd = newsd;
+        args->seed = seed;
 
         pthread_t tid;
         pthread_create(&tid, NULL, wordle, args);
@@ -164,13 +189,8 @@ int wordle_server(int argc, char** argv) {
         }
     }
 
-    for(int i = 0; i < sd_count; i++) {
-        close(*(siddies+i));
-    }
-
-    free(siddies);
     close(listener);
-    free(dictionary);
+    free(words);
 
     return EXIT_SUCCESS;
 }
