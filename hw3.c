@@ -19,6 +19,8 @@ extern int total_guesses;
 extern int total_wins;
 extern int total_losses;
 extern char ** words;
+int* generated;
+int len_generated;
 int* listeners;
 int len_listeners;
 
@@ -26,6 +28,8 @@ struct arguments {
     struct sockaddr_in client;
     int sd;
     int seed;
+    int num_words;
+    char* target;
 };
 
 pthread_mutex_t mutex_guesses = PTHREAD_MUTEX_INITIALIZER;
@@ -43,6 +47,12 @@ void signal_handler(int sig) {
         }
         free(listeners);
     }
+
+    printf("MAIN: valid guesses: %d\n", total_guesses);
+    printf("MAIN: win/loss: %d/%d\n", total_wins, total_losses);
+    for(int i = 0; i < len_generated; i++){
+        printf("MAIN: word #%d: %s" , i, *(words + *(generated + i)));
+    }
     exit(EXIT_SUCCESS);
 }
 
@@ -53,12 +63,16 @@ void* wordle(void* arg) {
     int n;
     char* buffer = calloc(9, 1);
     int sd = ((struct arguments *)arg)->sd;
+    int seed = ((struct arguments *)arg)->seed;
+    int num_words = ((struct arguments *)arg)->num_words;
+    char* hidden_word = calloc(6,1);
+    strcpy(hidden_word, ((struct arguments *)arg)->target);
     free(arg);
+    // int rand_index = rand() % num_words;
+    // strcpy(hidden_word, *(words + rand_index));
+    //strcpy(hidden_word, *(words + 12));
     
-    char* hidden_word = calloc(6, sizeof(char));
-    int rand_index = rand() % (sizeof(words) / 8);
-    strcpy(hidden_word, *(words + rand_index));
-
+    
     int guesses_left = 6;
     int correct = 0;
     do {
@@ -186,6 +200,7 @@ void* wordle(void* arg) {
 
     /* send appropriate signal to determine if user got it right or not */
     free(buffer);
+    free(hidden_word);
     close(sd);
     pthread_detach(pthread_self());
     return NULL;
@@ -205,6 +220,8 @@ int wordle_server(int argc, char** argv) {
 
     listeners = calloc(1, sizeof(int));
     len_listeners = 0;
+    generated = calloc(1, sizeof(int));
+    len_generated = 0;
 
     if(argc != 5) {
         fprintf(stderr, "vibe check failed\n");
@@ -234,6 +251,9 @@ int wordle_server(int argc, char** argv) {
             fprintf(stderr, "vibe check failed\n");
             return 69;
         }
+        for(int j = 0; j < 5; j ++){
+            *(buffer + j) = tolower(*(buffer + j));
+        }
         *(buffer + rc - 1) = '\0';
         strcpy(*(words + i), buffer);
     }
@@ -246,7 +266,6 @@ int wordle_server(int argc, char** argv) {
 
     printf("MAIN: opened %s (%d words)\n", path, num_words);
 
-    srand(seed);
     printf("MAIN: seeded pseudo-random number generator with %d\n", seed);
 
     /* Create the listener socket as TCP socket (SOCK_STREAM) */
@@ -277,6 +296,8 @@ int wordle_server(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    srand(seed);
+
     printf( "MAIN: Wordle server listening on port {%d}\n", port );
 
     /* ========================= network setup code above ==================== */
@@ -300,14 +321,26 @@ int wordle_server(int argc, char** argv) {
         
         // char* args = calloc(1, sizeof(arguments));
         // *args = newsd;
+
+        char* target = calloc(6, 1);
+        int rand_index = rand() % num_words;
+        strcpy(target, *(words + rand_index));
+
+        generated = realloc(generated, len_generated + 1);
+        *(generated + len_generated) = rand_index;
+        len_generated += 1;
+
         struct arguments * args = malloc(sizeof(remote_client) + 4);
         args->client = remote_client;
         args->sd = newsd;
         args->seed = seed;
+        args->num_words = num_words;
 
         pthread_t tid;
         int rc = pthread_create(&tid, NULL, wordle, args);
 
+        free(target);
+        
         if ( rc == -1 ) { 
             perror( "pthread_create() failed" ); 
             return EXIT_FAILURE; 
